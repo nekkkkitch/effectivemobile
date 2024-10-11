@@ -7,13 +7,14 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strconv"
+	"reflect"
 
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
 
 type Song struct {
+	Id          int
 	Group       string `json:"group"`
 	Name        string `json:"name"`
 	ReleaseDate string `json:"releasedate"`
@@ -24,7 +25,6 @@ type Song struct {
 type DataFilter struct {
 	Limit       int  `json:"limit"`
 	Page        int  `json:"page"`
-	ID          bool `json:"id"`
 	Group       bool `json:"group"`
 	Name        bool `json:"name"`
 	ReleaseDate bool `json:"releasedate"`
@@ -57,26 +57,43 @@ func GetLibData(w http.ResponseWriter, r *http.Request) {
 		panic(err)
 	}
 	defer db.Close()
-	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	var datafilter DataFilter
+	err = json.NewDecoder(r.Body).Decode(&datafilter)
 	if err != nil {
 		panic(err)
 	}
-	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil {
-		panic(err)
-	}
+	limit := datafilter.Limit
+	page := datafilter.Page
+	log.Printf("Songs per page: %v\nCurrent page: %v\n", limit, page)
 	res, err := db.Query(fmt.Sprintf("select * from songs order by id limit %v offset %v", limit, (page-1)*limit))
-	songs := []Song{}
+	var songs []Song
 	for res.Next() {
-		song := Song{}
-		if err = res.Scan(&song); err != nil {
+		var song Song
+		if err = res.Scan(&song.Id, &song.Group, &song.Name, &song.ReleaseDate, &song.Text, &song.Link); err != nil {
 			panic(err)
 		}
 		songs = append(songs, song)
 	}
+	log.Printf("Songs to show: %v", songs)
+	var msg string
 	for i := range songs {
-		fmt.Fprint(w, songs[i])
+		msg += fmt.Sprintf("%v) ", i+1)
+		songValues := reflect.ValueOf(songs[i])
+		songTypes := songValues.Type()
+		filterValues := reflect.ValueOf(datafilter)
+		filterTypes := filterValues.Type()
+		for i := 0; i < songValues.NumField(); i++ {
+			for j := 0; j < filterValues.NumField(); j++ {
+				if filterTypes.Field(j).Name == songTypes.Field(i).Name {
+					if filterValues.Field(j).Bool() {
+						msg += songTypes.Field(i).Type.Name() + ": " + songValues.Field(i).String() + "\n"
+					}
+				}
+			}
+		}
+		msg += "\n"
 	}
+	fmt.Fprintln(w, msg)
 }
 
 func GetSongText(w http.ResponseWriter, r *http.Request) {
@@ -122,4 +139,33 @@ func AddSong(w http.ResponseWriter, r *http.Request) {
 		panic(err)
 	}
 	log.Println(res)
+
 }
+
+/*
+func BuildQuery(requestedData []string, limit, page int) string {
+	var query string
+	query = fmt.Sprintf("select (%v) from songs order by id limit %v offset %v",
+		strings.Join(requestedData, ", "), limit, (page-1)*limit)
+	log.Println("Result query: " + query)
+	return query
+}
+
+
+func RequestedData(filter DataFilter) (int, int, []string) {
+	var requestedData []string
+	values := reflect.ValueOf(filter)
+	types := values.Type()
+	for i := 0; i < values.NumField(); i++ {
+		if reflect.TypeOf(values.Field(i)).Kind() == reflect.Bool {
+			if values.Field(i).Bool() {
+				if types.Field(i).Name == "Group" {
+					requestedData = append(requestedData, "\"group\"")
+				}
+				requestedData = append(requestedData, types.Field(i).Name)
+			}
+		}
+	}
+	return filter.Limit, filter.Page, requestedData
+}
+*/
