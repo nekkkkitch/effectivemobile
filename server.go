@@ -2,12 +2,16 @@ package main
 
 import (
 	"database/sql"
+	"effectivemobiletask/migrator"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"reflect"
+	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -23,8 +27,6 @@ type Song struct {
 }
 
 type DataFilter struct {
-	Limit       int  `json:"limit"`
-	Page        int  `json:"page"`
 	Group       bool `json:"group"`
 	Name        bool `json:"name"`
 	ReleaseDate bool `json:"releasedate"`
@@ -32,7 +34,10 @@ type DataFilter struct {
 	Link        bool `json:"link"`
 }
 
+var migrationsDir string
+var MigrationsFS embed.FS
 var dblog string
+var inforeq string
 
 func init() {
 	if err := godotenv.Load("go.env"); err != nil {
@@ -40,11 +45,16 @@ func init() {
 	}
 	var exist bool
 	dblog, exist = os.LookupEnv("dblog")
-	log.Println(exist, dblog)
+	log.Printf("DB connection parameters: %v, Exist: %v", dblog, exist)
+	inforeq, exist = os.LookupEnv("inforeq")
+	log.Printf("Fortified connection link: %v, Exist: %v", inforeq, exist)
+	migrationsDir, exist = os.LookupEnv("migrationsDir")
+	log.Printf("Migration files directory: %v, Exist: %v", migrationsDir, exist)
+	Migrate()
 }
 func main() {
-	http.HandleFunc("/libdata", GetLibData)
-	http.HandleFunc("/song", GetSongText)
+	http.HandleFunc("/getlibdata", GetLibData)
+	http.HandleFunc("/getsongtext", GetSongText)
 	http.HandleFunc("/deletesong", DeleteSong)
 	http.HandleFunc("/changesong", ChangeSong)
 	http.HandleFunc("/addsong", AddSong)
@@ -62,9 +72,15 @@ func GetLibData(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		panic(err)
 	}
-	limit := datafilter.Limit
-	page := datafilter.Page
-	log.Printf("Songs per page: %v\nCurrent page: %v\n", limit, page)
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil {
+		panic(err)
+	}
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil {
+		panic(err)
+	}
+	log.Printf("Songs per page: %v, Current page: %v\n", limit, page)
 	res, err := db.Query(fmt.Sprintf("select * from songs order by id limit %v offset %v", limit, (page-1)*limit))
 	var songs []Song
 	for res.Next() {
@@ -86,7 +102,7 @@ func GetLibData(w http.ResponseWriter, r *http.Request) {
 			for j := 0; j < filterValues.NumField(); j++ {
 				if filterTypes.Field(j).Name == songTypes.Field(i).Name {
 					if filterValues.Field(j).Bool() {
-						msg += songTypes.Field(i).Type.Name() + ": " + songValues.Field(i).String() + "\n"
+						msg += songTypes.Field(i).Name + ": " + songValues.Field(i).String() + "\n"
 					}
 				}
 			}
@@ -97,11 +113,58 @@ func GetLibData(w http.ResponseWriter, r *http.Request) {
 }
 
 func GetSongText(w http.ResponseWriter, r *http.Request) {
-
+	db, err := sql.Open("postgres", dblog)
+	if err != nil {
+		panic(err)
+	}
+	defer db.Close()
+	var song Song
+	err = json.NewDecoder(r.Body).Decode(&song)
+	log.Printf("Requested song: %v", song)
+	if err != nil {
+		panic(err)
+	}
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil {
+		panic(err)
+	}
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil {
+		panic(err)
+	}
+	log.Printf("Couplets to show: %v, Current page: %v", limit, page)
+	row := db.QueryRow(fmt.Sprintf("select text from songs where \"group\"='%v' and name='%v'", song.Group, song.Name))
+	var songText string
+	err = row.Scan(&songText)
+	log.Printf("Result text: %v", songText)
+	if err != nil {
+		panic(err)
+	}
+	songTextPagination := strings.Split(songText, `\n\n`)
+	for i := (page - 1) * limit; i < page*limit; i++ {
+		songTextPagination[i] += "\n"
+		fmt.Fprintln(w, strings.Replace(songTextPagination[i], `\n`, "\n", -1))
+	}
 }
 
 func DeleteSong(w http.ResponseWriter, r *http.Request) {
+	db, err := sql.Open("postgres", dblog)
+	if err != nil {
+		panic(err)
+	}
+	defer db.Close()
+	var song Song
+	err = json.NewDecoder(r.Body).Decode(&song)
+	if err != nil {
+		panic(err)
+	}
+	log.Printf("Song to delete: %v", song)
 
+	res, err := db.Exec(fmt.Sprintf("delete from songs where \"group\"='%v' and name='%v'", song.Group, song.Name))
+	if err != nil {
+		log.Panic(err)
+	}
+	log.Printf("Result: %v", res)
 }
 
 func ChangeSong(w http.ResponseWriter, r *http.Request) {
@@ -109,13 +172,18 @@ func ChangeSong(w http.ResponseWriter, r *http.Request) {
 }
 
 func AddSong(w http.ResponseWriter, r *http.Request) {
-	var song Song
-	err := json.NewDecoder(r.Body).Decode(&song)
+	db, err := sql.Open("postgres", dblog)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(song)
-	resp, err := http.Get("http://127.0.0.1:8070/info")
+	defer db.Close()
+	var song Song
+	err = json.NewDecoder(r.Body).Decode(&song)
+	if err != nil {
+		panic(err)
+	}
+	log.Println("Song to add: " + song.Group + ": " + song.Name)
+	resp, err := http.Get(inforeq)
 	if err != nil {
 		panic(err)
 	}
@@ -128,11 +196,7 @@ func AddSong(w http.ResponseWriter, r *http.Request) {
 	song.ReleaseDate = songFiller.ReleaseDate
 	song.Text = songFiller.Text
 	song.Link = songFiller.Link
-	fmt.Println(song)
-	db, err := sql.Open("postgres", dblog)
-	if err != nil {
-		panic(err)
-	}
+	fmt.Printf("Fortified song: %v", song)
 	res, err := db.Exec(fmt.Sprintf("insert into songs(\"group\", name, releasedate, text, link) values('%v', '%v', '%v', '%v', '%v')",
 		song.Group, song.Name, song.ReleaseDate, song.Text, song.Link))
 	if err != nil {
@@ -140,6 +204,20 @@ func AddSong(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Println(res)
 
+}
+
+func Migrate() {
+	migrator := migrator.MustGetNewMigrator(MigrationsFS, migrationsDir)
+	db, err := sql.Open("postgres", dblog)
+	if err != nil {
+		panic(err)
+	}
+	defer db.Close()
+	err = migrator.ApplyMigrations(db)
+	if err != nil {
+		panic(err)
+	}
+	log.Println("Migrations has applied to database")
 }
 
 /*
