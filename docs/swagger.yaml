@@ -1,0 +1,135 @@
+basePath: /
+definitions:
+  main.Song:
+    properties:
+      group:
+        type: string
+      id:
+        type: integer
+      link:
+        type: string
+      name:
+        type: string
+      releasedate:
+        type: string
+      text:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  title: EffectiveMobileAPI
+  version: "1.0"
+paths:
+  /addsong:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Song name and group
+        in: body
+        name: song
+        required: true
+        schema:
+          $ref: '#/definitions/main.Song'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+      summary: Добавление песни
+  /changesong:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: Song name and group
+        in: body
+        name: song
+        required: true
+        schema:
+          $ref: '#/definitions/main.Song'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+      summary: Изменение песни
+  /deletesong:
+    delete:
+      consumes:
+      - application/json
+      parameters:
+      - description: Song name and group
+        in: body
+        name: song
+        required: true
+        schema:
+          $ref: '#/definitions/main.Song'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+      summary: Удаление песни
+  /getlibdata:
+    get:
+      description: Возвращает список всех песен
+      parameters:
+      - description: DataFilter
+        in: header
+        name: Filter
+        required: true
+        type: string
+      - description: Songs per page
+        in: query
+        name: limit
+        required: true
+        type: integer
+      - description: Page
+        in: query
+        name: page
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: object
+            type: array
+      summary: Получить список песен
+  /getsongtext:
+    get:
+      parameters:
+      - description: Song name
+        in: query
+        name: name
+        required: true
+        type: string
+      - description: Song group
+        in: query
+        name: group
+        required: true
+        type: string
+      - description: Songs per page
+        in: query
+        name: limit
+        required: true
+        type: integer
+      - description: Page
+        in: query
+        name: page
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+      summary: Получение песни с пагинацией
+schemes:
+- http
+swagger: "2.0"
